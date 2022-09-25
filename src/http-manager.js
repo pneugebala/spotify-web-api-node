@@ -1,8 +1,6 @@
 'use strict';
 
-var superagent = require('superagent'),
-  { TimeoutError, 
-    WebapiError, 
+var { WebapiError, 
     WebapiRegularError, 
     WebapiAuthenticationError,
     WebapiPlayerError 
@@ -30,56 +28,64 @@ var _getParametersFromRequest = function(request) {
   return options;
 };
 
-var _toError = function(response) {
-  if (typeof response.body === 'object' && response.body.error && typeof response.body.error === 'object' && response.body.error.reason) {
-    return new WebapiPlayerError(response.body, response.headers, response.statusCode);
+var _toError = function(response, body) {
+  if (typeof body === 'object' && body.error && typeof body.error === 'object' && body.error.reason) {
+    return new WebapiPlayerError(body, response.headers, response.status);
   }
 
-  if (typeof response.body === 'object' && response.body.error && typeof response.body.error === 'object') {
-    return new WebapiRegularError(response.body, response.headers, response.statusCode);
+  if (typeof body === 'object' && body.error && typeof body.error === 'object') {
+    return new WebapiRegularError(body, response.headers, response.status);
   }
 
-  if (typeof response.body === 'object' && response.body.error && typeof response.body.error === 'string') {
-    return new WebapiAuthenticationError(response.body, response.headers, response.statusCode);
+  if (typeof body === 'object' && body.error && typeof body.error === 'string') {
+    return new WebapiAuthenticationError(body, response.headers, response.status);
   }
   
   /* Other type of error, or unhandled Web API error format */
-  return new WebapiError(response.body, response.headers, response.statusCode, response.body);
+  return new WebapiError(body, response.headers, response.status, body);
 };
 
 /* Make the request to the Web API */
 HttpManager._makeRequest = function(method, options, uri, callback) {
-  var req = method.bind(superagent)(uri);
+  var fetchOptions = { method: method };
+  var url = uri;
 
   if (options.query) {
-    req.query(options.query);
+    url += `?${new URLSearchParams(options.query)}`
   }
 
   if (options.headers) {
-    req.set(options.headers);
+    fetchOptions.headers = options.headers;
   }
 
   if (options.data) {
-    req.send(options.data);
+    if (options.headers['Content-Type'] === 'application/json') {
+      fetchOptions.body = JSON.stringify(options.data);
+    } else if (options.headers['Content-Type'] === 'application/x-www-form-urlencoded') {
+      fetchOptions.body = new URLSearchParams(options.data);
+    } else {
+      fetchOptions.body = `${options.data}`;
+    }
   }
 
-  req.end(function(err, response) {
-    if (err) {
-      if (err.timeout) {
-        return callback(new TimeoutError());
-      } else if (err.response) {
-        return callback(_toError(err.response));
-      } else {
-        return callback(err);
-      }
-    }
+  fetch(url, fetchOptions)
+    .then(res => {
+      res.text()
+        .then(body => JSON.parse(body))
+        .then(body => {
+          if (res.status < 200 || res.status >= 400) {
+            return callback(_toError(res, body))
+          }
 
-    return callback(null, {
-      body: response.body,
-      headers: response.headers,
-      statusCode: response.statusCode
-    });
-  });
+          return callback(null, {
+            body: body,
+            headers: res.headers,
+            statusCode: res.status
+          });
+        })
+        .catch(err => callback(err))
+    })
+    .catch(err => callback(err))
 };
 
 /**
@@ -89,7 +95,7 @@ HttpManager._makeRequest = function(method, options, uri, callback) {
  */
 HttpManager.get = function(request, callback) {
   var options = _getParametersFromRequest(request);
-  var method = superagent.get;
+  var method = 'GET';
 
   HttpManager._makeRequest(method, options, request.getURI(), callback);
 };
@@ -101,7 +107,7 @@ HttpManager.get = function(request, callback) {
  */
 HttpManager.post = function(request, callback) {
   var options = _getParametersFromRequest(request);
-  var method = superagent.post;
+  var method = 'POST';
 
   HttpManager._makeRequest(method, options, request.getURI(), callback);
 };
@@ -113,7 +119,7 @@ HttpManager.post = function(request, callback) {
  */
 HttpManager.del = function(request, callback) {
   var options = _getParametersFromRequest(request);
-  var method = superagent.del;
+  var method = 'DELETE';
 
   HttpManager._makeRequest(method, options, request.getURI(), callback);
 };
@@ -125,7 +131,7 @@ HttpManager.del = function(request, callback) {
  */
 HttpManager.put = function(request, callback) {
   var options = _getParametersFromRequest(request);
-  var method = superagent.put;
+  var method = 'PUT';
 
   HttpManager._makeRequest(method, options, request.getURI(), callback);
 };
